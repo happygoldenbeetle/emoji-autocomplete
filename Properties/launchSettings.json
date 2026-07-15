@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "EmojiTyper (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "EmojiTyper (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
