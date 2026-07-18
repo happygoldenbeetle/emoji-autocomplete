@@ -66,3 +66,9 @@ scratchpad/
 
 # Local design scratch folder
 New folder/
+
+# Signing key (never commit the private key)
+*.pfx
+
+# Built installer package (large binary; distribute via releases, not git)
+installer/*.msix

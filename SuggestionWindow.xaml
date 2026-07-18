@@ -17,18 +17,34 @@
         Background="Transparent"
         BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
         BorderThickness="1"
-        CornerRadius="8">
+        CornerRadius="8"
+        Padding="2">
         <ListView
             x:Name="List"
-            Padding="4"
+            Padding="0"
             IsItemClickEnabled="True"
             ItemClick="OnItemClick"
-            SelectionMode="Single">
+            SelectionMode="Single"
+            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+            ScrollViewer.HorizontalScrollMode="Disabled"
+            ScrollViewer.VerticalScrollBarVisibility="Hidden"
+            ScrollViewer.VerticalScrollMode="Disabled">
+            <ListView.Resources>
+                <!-- Hide the accent selection bar on the left of the selected item. -->
+                <SolidColorBrush x:Key="ListViewItemSelectionIndicatorBrush" Color="Transparent" />
+                <SolidColorBrush x:Key="ListViewItemSelectionIndicatorPointerOverBrush" Color="Transparent" />
+                <SolidColorBrush x:Key="ListViewItemSelectionIndicatorPressedBrush" Color="Transparent" />
+                <SolidColorBrush x:Key="ListViewItemSelectionIndicatorDisabledBrush" Color="Transparent" />
+            </ListView.Resources>
             <ListView.ItemContainerStyle>
-                <Style TargetType="ListViewItem">
+                <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                    <Setter Property="Height" Value="42" />
                     <Setter Property="MinHeight" Value="0" />
-                    <Setter Property="Padding" Value="8,4" />
-                    <Setter Property="Margin" Value="0" />
+                    <Setter Property="Padding" Value="8" />
+                    <Setter Property="Margin" Value="2" />
+                    <Setter Property="CornerRadius" Value="8" />
+                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 </Style>
             </ListView.ItemContainerStyle>
             <ListView.ItemTemplate>

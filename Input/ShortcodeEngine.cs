@@ -129,6 +129,26 @@ public sealed class ShortcodeEngine : IDisposable
         if (IsModifier(vk))
             return false;
 
+        // Left/Right arrows just move the caret along the line — let the user
+        // reposition without cancelling the in-progress shortcode or the popup.
+        if (vk is 0x25 or 0x27) // VK_LEFT / VK_RIGHT
+            return false;
+
+        // A Ctrl/Alt shortcut (Ctrl+A, Ctrl+V, Ctrl+Z, …) changes the text or
+        // selection in ways we can't track — abandon any in-progress shortcode
+        // and never fold the key into the buffer. Ctrl+Backspace is the one
+        // exception; it's handled as a word-delete below.
+        bool ctrlOrAlt = ((GetKeyState(0x11) | GetKeyState(0x12)) & 0x8000) != 0;
+        if (ctrlOrAlt && vk != 0x08) // VK_CONTROL / VK_MENU held, non-backspace
+        {
+            if (_active || _suspended)
+            {
+                Reset();
+                Cancelled?.Invoke();
+            }
+            return false;
+        }
+
         // Navigation/commit keys only bite while suggestions are visible.
         if (Suggesting)
         {
@@ -151,11 +171,12 @@ public sealed class ShortcodeEngine : IDisposable
         // the shortcode; anything else abandons it for good.
         if (_suspended)
         {
+            // Backspace deletes the terminator (e.g. the space) and resumes.
             if (vk == 0x08) // VK_BACK
             {
                 _suspended = false;
                 RaiseUpdate();   // repopulate + reshow the popup
-                return false;    // let the backspace remove the space
+                return false;
             }
             Reset();
             Cancelled?.Invoke();
@@ -184,6 +205,24 @@ public sealed class ShortcodeEngine : IDisposable
         // Backspace edits / cancels the buffer.
         if (vk == 0x08) // VK_BACK
         {
+            bool ctrl = (GetKeyState(0x11) & 0x8000) != 0; // VK_CONTROL
+
+            // Ctrl+Backspace deletes a whole word in most apps, wiping the entire
+            // shortcode at once — so clear the whole buffer, not just one char,
+            // to stay in sync (otherwise the popup lingers after the text is gone).
+            if (ctrl)
+            {
+                if (_buffer.Length > 0)
+                {
+                    _buffer = string.Empty;
+                    RaiseUpdate(); // empty query -> popup hides
+                    return false;
+                }
+                Reset(); // buffer already empty: the ':' itself gets deleted
+                Cancelled?.Invoke();
+                return false;
+            }
+
             if (_buffer.Length > 0)
             {
                 _buffer = _buffer[..^1];
@@ -229,7 +268,7 @@ public sealed class ShortcodeEngine : IDisposable
     {
         0x09 or 0x0D or 0x1B => true,          // Tab, Enter, Esc
         0x21 or 0x22 or 0x23 or 0x24 => true,  // PageUp, PageDown, End, Home
-        0x25 or 0x26 or 0x27 or 0x28 => true,  // Left, Up, Right, Down
+        0x26 or 0x28 => true,                  // Up, Down (Left/Right suspend instead)
         0x2C or 0x2D or 0x2E => true,          // PrintScreen, Insert, Delete
         >= 0x70 and <= 0x87 => true,           // F1..F24
         _ => false,

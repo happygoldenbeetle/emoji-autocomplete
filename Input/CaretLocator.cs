@@ -3,17 +3,20 @@ using static EmojiTyper.Interop.NativeMethods;
 namespace EmojiTyper.Input;
 
 /// <summary>
-/// Best-effort screen position for the popup: the focused app's text caret when
-/// we can read it, otherwise the mouse cursor. All coordinates are physical
-/// pixels, matching AppWindow.Move.
+/// Best-effort screen rectangle of the focused app's text caret (its X and its
+/// top/bottom Y), so the popup can be placed below it — or flipped above it when
+/// there isn't room below. Falls back to the mouse cursor. All coordinates are
+/// physical pixels, matching AppWindow.Move.
 /// </summary>
 internal static class CaretLocator
 {
-    private const int GapBelowCaret = 4;
-    private const int GapBelowCursor = 20;
-
-    public static (int X, int Y) GetPopupAnchor()
+    public static (int X, int Top, int Bottom) GetCaretAnchor()
     {
+        // 1. UI Automation caret — works in modern apps (Chromium, Electron, …).
+        if (UiaCaret.TryGetCaret() is { } uia)
+            return (uia.X, uia.Top, uia.Bottom);
+
+        // 2. Classic Win32 caret — works in native/Win32 controls (Notepad, …).
         nint fg = GetForegroundWindow();
         if (fg != 0)
         {
@@ -23,16 +26,17 @@ internal static class CaretLocator
                 gti.hwndCaret != 0 &&
                 (gti.rcCaret.Bottom - gti.rcCaret.Top) > 0)
             {
-                var pt = new POINT { X = gti.rcCaret.Left, Y = gti.rcCaret.Bottom };
-                if (ClientToScreen(gti.hwndCaret, ref pt))
-                    return (pt.X, pt.Y + GapBelowCaret);
+                var top = new POINT { X = gti.rcCaret.Left, Y = gti.rcCaret.Top };
+                var bottom = new POINT { X = gti.rcCaret.Left, Y = gti.rcCaret.Bottom };
+                if (ClientToScreen(gti.hwndCaret, ref top) && ClientToScreen(gti.hwndCaret, ref bottom))
+                    return (top.X, top.Y, bottom.Y);
             }
         }
 
-        // Fallback: drop it just below the mouse pointer.
+        // Fallback: anchor to the mouse pointer (treat it as a short caret).
         if (GetCursorPos(out var cur))
-            return (cur.X, cur.Y + GapBelowCursor);
+            return (cur.X, cur.Y, cur.Y + 18);
 
-        return (100, 100);
+        return (100, 100, 118);
     }
 }

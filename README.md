@@ -1,4 +1,4 @@
-# Emoji Typer
+# Emoji Autocomplete
 
 A system-wide `:shortcode:` emoji autocomplete for Windows — type `:sob:` in **any**
 application and it becomes 😭, Discord/Slack-style. Built with **WinUI 3** (Windows App SDK)

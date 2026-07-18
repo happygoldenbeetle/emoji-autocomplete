@@ -18,7 +18,10 @@ namespace EmojiTyper;
 /// </summary>
 public sealed partial class SuggestionWindow : Window
 {
-    private const double RowHeightDip = 34;
+    // Must match SuggestionWindow.xaml: item Height 42 + Margin 2 top/bottom = 46
+    // per row; chrome = BorderThickness 2 + Border Padding 4 (both axes) = 6.
+    private const double RowHeightDip = 46;
+    private const double ChromeDip = 6;
     private const double WidthDip = 300;
     private const int MaxRows = 8;
 
@@ -33,6 +36,13 @@ public sealed partial class SuggestionWindow : Window
     private double _scale = 1.0;
 
     private List<EmojiEntry> _items = new();
+
+    // Caret anchor + chosen placement, remembered so that in-place resizes keep
+    // the popup glued to the caret (top edge when below, bottom edge when above).
+    private int _anchorX;
+    private int _caretTop;
+    private int _caretBottom;
+    private bool _placeAbove;
 
     /// <summary>Raised when the user clicks a suggestion. Argument is the glyph.</summary>
     public event Action<string>? Chosen;
@@ -70,22 +80,64 @@ public sealed partial class SuggestionWindow : Window
     }
 
     /// <summary>
-    /// Show the popup at a screen position (physical pixels) with the given
-    /// matches. <paramref name="screenX"/>/<paramref name="screenY"/> is the
-    /// desired top-left; callers typically pass just below the caret.
+    /// Show the popup anchored to the caret (physical px). It sits just below the
+    /// caret when there's room, and flips above it when there isn't. X/Y are
+    /// clamped to the monitor's work area.
     /// </summary>
-    public void ShowAt(int screenX, int screenY, IReadOnlyList<EmojiEntry> matches)
+    public void ShowAt(int caretX, int caretTop, int caretBottom, IReadOnlyList<EmojiEntry> matches)
     {
+        _anchorX = caretX;
+        _caretTop = caretTop;
+        _caretBottom = caretBottom;
+
         SetItems(matches);
         Resize(matches.Count);
-        _appWindow.Move(new PointInt32(screenX, screenY));
-        // Force topmost z-order + visible without activating (so we don't steal
-        // focus from the app the user is typing in).
-        SetWindowPos(_hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+        // Decide once (at open) whether to sit below or flip above, based on the
+        // room available. The choice is kept for the rest of this popup session
+        // so it doesn't jump sides as the result count changes.
+        int h = _appWindow.Size.Height;
+        int gap = (int)Math.Round(4 * _scale);
+        var (_, workTop, _, workBottom) = GetWorkArea(caretX, caretBottom);
+        bool fitsBelow = caretBottom + gap + h <= workBottom;
+        bool fitsAbove = caretTop - gap - h >= workTop;
+        _placeAbove = !fitsBelow && fitsAbove;
+
+        PositionWindow();
         IsOpen = true;
         if (Diagnostics.Log.Verbose)
-            Diagnostics.Log.Write($"ShowAt done pos=({_appWindow.Position.X},{_appWindow.Position.Y}) size=({_appWindow.Size.Width}x{_appWindow.Size.Height}) visible={_appWindow.IsVisible}");
+            Diagnostics.Log.Write($"ShowAt done pos=({_appWindow.Position.X},{_appWindow.Position.Y}) size=({_appWindow.Size.Width}x{_appWindow.Size.Height}) above={_placeAbove}");
+    }
+
+    /// <summary>
+    /// Move the (already-sized) window to keep it anchored to the caret: top edge
+    /// just below the caret, or — when flipped up — bottom edge just above it, so
+    /// resizing shrinks/grows from the far side and stays attached.
+    /// </summary>
+    private void PositionWindow()
+    {
+        int w = _appWindow.Size.Width;
+        int h = _appWindow.Size.Height;
+        int gap = (int)Math.Round(4 * _scale);
+        var (workLeft, workTop, workRight, workBottom) = GetWorkArea(_anchorX, _caretBottom);
+
+        int y = _placeAbove ? _caretTop - gap - h : _caretBottom + gap;
+        y = Math.Clamp(y, workTop, Math.Max(workTop, workBottom - h));
+        int x = Math.Clamp(_anchorX, workLeft, Math.Max(workLeft, workRight - w));
+
+        _appWindow.Move(new PointInt32(x, y));
+        // Force topmost z-order + visible without activating (don't steal focus).
+        SetWindowPos(_hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+
+    private static (int Left, int Top, int Right, int Bottom) GetWorkArea(int x, int y)
+    {
+        var mi = new MONITORINFO { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFO>() };
+        IntPtr mon = MonitorFromPoint(new POINT { X = x, Y = y }, MONITOR_DEFAULTTONEAREST);
+        if (mon != IntPtr.Zero && GetMonitorInfo(mon, ref mi))
+            return (mi.rcWork.Left, mi.rcWork.Top, mi.rcWork.Right, mi.rcWork.Bottom);
+        return (0, 0, 100000, 100000); // no clamp if we can't read the monitor
     }
 
     /// <summary>Refresh the list in place while the popup is already open.</summary>
@@ -93,6 +145,7 @@ public sealed partial class SuggestionWindow : Window
     {
         SetItems(matches);
         Resize(matches.Count);
+        PositionWindow(); // keep it anchored to the caret as the height changes
     }
 
     public void MoveSelection(int delta)
@@ -123,6 +176,14 @@ public sealed partial class SuggestionWindow : Window
         IsOpen = false;
     }
 
+    /// <summary>True if a screen point (physical px) is within the popup bounds.</summary>
+    public bool ContainsScreenPoint(int x, int y)
+    {
+        var p = _appWindow.Position;
+        var s = _appWindow.Size;
+        return x >= p.X && x < p.X + s.Width && y >= p.Y && y < p.Y + s.Height;
+    }
+
     private void SetItems(IReadOnlyList<EmojiEntry> matches)
     {
         _items = new List<EmojiEntry>(matches);
@@ -133,7 +194,7 @@ public sealed partial class SuggestionWindow : Window
     private void Resize(int count)
     {
         int rows = Math.Clamp(count, 1, MaxRows);
-        double heightDip = rows * RowHeightDip + 10; // padding + border
+        double heightDip = rows * RowHeightDip + ChromeDip;
         _appWindow.Resize(new SizeInt32(
             (int)Math.Round(WidthDip * _scale),
             (int)Math.Round(heightDip * _scale)));
